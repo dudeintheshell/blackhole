@@ -2,13 +2,17 @@ from gevent.server import StreamServer
 from gevent import ssl
 from gevent import socket
 from datetime import datetime
+from gevent.server import DatagramServer
+import gevent
 import os
 import time
 
-global ttl
-ttl = 60
+global ttl, httpData
+ttl = 10
+httpData = "HTTP/1.1 200 OK\nContent-Type: text/html; charset=utf-8\nContent-Length: 0\n\n"
 
 #iptables -t nat -A PREROUTING -p tcp --dport 1:65535 -j REDIRECT --to-ports 5000
+#iptables -t nat -A PREROUTING -p udp --dport 1:65535 -j REDIRECT --to-ports 5000
 
 def telnetparse(input):
     if "echo" in input and "-e" in input:
@@ -34,7 +38,12 @@ def telnetparse(input):
         else:
             ino = toout
         return ino
-    return None               
+    return None    
+
+def checkHTTP(input):
+    if "HTTP/" in input and ( input[-4:] == "\r\n\r\n"  or input[-2:] == "\n\n" ):
+        return True
+    return False
 
 def recv(sock):
     buf = ""
@@ -44,23 +53,24 @@ def recv(sock):
         buf = ""
     return buf
 
-def handle(socket, address):
-    global ttl
+def handleTCP(socket, address):
+    global ttl, httpData
     socket.settimeout(ttl)
+    httpFlag = False
     ip, port = address
     buf = ""
     dport = 0
     try:
-        dport = int(os.popen("grep \"src=%s\" /proc/net/nf_conntrack | grep \"sport=%d\"| tail -n 1" % (ip, port,)).read().split("dport=", 1)[1].split(" ", 1)[0])
+        dport = int(os.popen("grep \"src=%s\" /proc/net/nf_conntrack | grep tcp | grep \"sport=%d\"| tail -n 1" % (ip, port,)).read().split("dport=", 1)[1].split(" ", 1)[0])
     except:
         pass
 
     if dport == 0:
         try:
-            dport = int(os.popen("grep \"src=%s\" /proc/net/ip_conntrack | grep \"sport=%d\"| tail -n 1" % (ip, port,)).read().split("dport=", 1)[1].split(" ", 1)[0])
+            dport = int(os.popen("grep \"src=%s\" /proc/net/ip_conntrack | grep tcp | grep \"sport=%d\"| tail -n 1" % (ip, port,)).read().split("dport=", 1)[1].split(" ", 1)[0])
         except:
             pass
-    log = "[+] Connection on Port: %d from %s:%d Time: %s\n" % (dport, ip, port, datetime.utcnow().isoformat())
+    log = "[+] TCP Connection on Port: %d from %s:%d Time: %s\n" % (dport, ip, port, datetime.utcnow().isoformat())
     print log,
     with open("logs.txt", "a") as f:
         f.write(log)
@@ -75,8 +85,12 @@ def handle(socket, address):
                 while True:
                     buffer = sslsock.read()
                     if not buffer:
+                        sslsock.send(httpData)
                         break
                     buf+=buffer
+                    if checkHTTP(buf):
+                        httpFlag = True
+
             except Exception as e:
                 print "[-] Error: %s" % (e,)
             finally:
@@ -114,6 +128,7 @@ def handle(socket, address):
                 buffer = recv(socket)
                 if not buffer:
                     socket.close()
+                    break
                 elif buffer == "\n":
                     tosend = telnetparse(buf.split("\n")[-1])
                     if tosend <> None:
@@ -130,19 +145,60 @@ def handle(socket, address):
             while not socket.closed:
                 buffer = recv(socket)
                 if not buffer:
+                    if httpFlag:
+                        socket.send(httpData)
                     socket.close()
+                    break
                 else:
                     buf+= buffer
+                    if checkHTTP(buf):
+                        httpFlag = True
+       
     except Exception as e:
         print "[-] Error : %s " % (e,)
-    with open("captures/%d_%s_%d_%s.txt" % (dport, ip, port, datetime.utcnow().isoformat().replace(":", "-").replace(".", "-"),) , "wb") as file:
+    with open("captures/tcp/%d_%s_%d_%s.txt" % (dport, ip, port, datetime.utcnow().isoformat().replace(":", "-").replace(".", "-"),) , "wb") as file:
         file.write(buf)
         file.close()    
 
+class UDPServer(DatagramServer):
+
+    def handle(self, data, address):
+        global ttl
+        self.socket.settimeout(ttl)
+        ip, port = address
+        dport = 0
+        try:
+            dport = int(os.popen("grep \"src=%s\" /proc/net/nf_conntrack | grep udp | grep \"sport=%d\"| tail -n 1" % (ip, port,)).read().split("dport=", 1)[1].split(" ", 1)[0])
+        except:
+            pass
+
+        if dport == 0:
+            try:
+                dport = int(os.popen("grep \"src=%s\" /proc/net/ip_conntrack | grep udp | grep \"sport=%d\"| tail -n 1" % (ip, port,)).read().split("dport=", 1)[1].split(" ", 1)[0])
+            except:
+                pass
+
+        log = "[+] UDP Connection on Port: %d from %s:%d Time: %s\n" % (dport, ip, port, datetime.utcnow().isoformat())
+        self.socket.close()
+        print log,
+        with open("logs.txt", "a") as f:
+            f.write(log)
+            f.close()
+        with open("captures/udp/%d_%s_%d_%s.txt" % (dport, ip, port, datetime.utcnow().isoformat().replace(":", "-").replace(".", "-"),) , "wb") as file:
+            file.write(data)
+            file.close()    
+
 if not os.path.exists("captures"):
         os.makedirs("captures")
-server = StreamServer(('', 5000), handle)
+if not os.path.exists("captures/tcp"):
+        os.makedirs("captures/tcp")
+if not os.path.exists("captures/udp"):
+        os.makedirs("captures/udp")
+
+tcpserver = StreamServer(('', 5000), handleTCP)
+udpserver = UDPServer(('', 5000))
+
 try:
-    server.serve_forever()
+    gevent.joinall( [gevent.spawn(tcpserver.serve_forever, () ), gevent.spawn(udpserver.serve_forever,() )] )
 except KeyboardInterrupt as e:
     pass

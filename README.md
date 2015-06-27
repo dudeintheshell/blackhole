@@ -1,6 +1,6 @@
 # Blackhole
 
-Blackhole is a low-interactive Honeypot that captures and logs everything. Using iptables all incoming TCP request are redirected to a single port, hence it seems as if the Honeypot is listening on all ports. Telnet(23) and HTTPS ([0-65]443) requests are supported in a limited way. The Honeypot was written as a PoC to capture all requests and so, has limited features. 
+Blackhole is a low-interactive Honeypot that captures and logs everything. Using iptables all incoming TCP and UDP request are redirected to a single port, hence it seems as if the Honeypot is listening on all ports. Telnet(23) and HTTPS ([0-65]443) requests are supported in a limited way. The Honeypot was written as a PoC to capture all requests and so, has limited features. 
 
 Blackhole is not an ideal Honeypot, but is very useful for capturing IPs and Raw requests of automated scanners.
 
@@ -38,9 +38,10 @@ Create SSL certificate
 
 ## Setup iptables rule
 
-If you want to redirect all TCP traffic to Blackhole use the following command:
+If you want to redirect all TCP and UDP traffic to Blackhole use the following command:
 
     sudo iptables -t nat -A PREROUTING -p tcp --dport 1:65535 -j REDIRECT --to-ports 5000
+    sudo iptables -t nat -A PREROUTING -p udp --dport 1:65535 -j REDIRECT --to-ports 5000
 
 Suppose you have other services running on the Host e.g. 22, 445 and you don't want to capture them via Blackhole,you can create multiple iptables rules:
 
