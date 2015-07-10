@@ -69,4 +69,4 @@ Once everything is ready, go to the Blackhole's directory and execute the follow
     python blackhole.py
 
 
-All captured data are stored in "captures" directory. Logs are stored in the "logs.txt" file.
+All captured data and binaries are stored in "captures" directory. Logs are stored in the "logs.txt" file.

@@ -3,6 +3,8 @@ from gevent import ssl
 from gevent import socket
 from datetime import datetime
 from gevent.server import DatagramServer
+
+import requests
 import gevent
 import os
 import time
@@ -13,6 +15,30 @@ httpData = "HTTP/1.1 200 OK\nContent-Type: text/html; charset=utf-8\nContent-Len
 
 #iptables -t nat -A PREROUTING -p tcp --dport 1:65535 -j REDIRECT --to-ports 5000
 #iptables -t nat -A PREROUTING -p udp --dport 1:65535 -j REDIRECT --to-ports 5000
+
+def grabHTTP(input, protocol, srcip, srcport, dport):
+    if "http://" in input:
+        for linechunk in input.split(" "):
+            fc = 1
+            try:
+                if "http://" == linechunk[:7]:
+                    url = linechunk.split(';', 1)[0].split("&", 1)[0].split("|", 1)[0].replace("\r","").replace("\n","")
+
+                    local_filename = "captures/binary/%s_%d_%s_%d_%d_%s" % (protocol, dport, srcip, srcport, fc, datetime.utcnow().isoformat().replace(":", "-").replace(".", "-"))
+                    log = "[+] Downloading URL: %s Filename: %s Connection %s:%d Protocol: %s Time: %s\n" % (url, local_filename, srcip, srcport, protocol, datetime.utcnow().isoformat())
+                    print log,
+                    with open("logs.txt", "a") as f:
+                        f.write(log)
+                        f.close()
+                        geturl = requests.get(url)
+                    with open(local_filename, 'wb') as f:
+                        for chunk in geturl.iter_content(chunk_size=1024): 
+                            if chunk:
+                                f.write(chunk)
+                        f.close()
+            except Exception as e:
+                print "[-] Error in grapHTTP: %s" % (e,)
+            
 
 def telnetparse(input):
     if "echo" in input and "-e" in input:
@@ -159,6 +185,7 @@ def handleTCP(socket, address):
     with open("captures/tcp/%d_%s_%d_%s.txt" % (dport, ip, port, datetime.utcnow().isoformat().replace(":", "-").replace(".", "-"),) , "wb") as file:
         file.write(buf)
         file.close()    
+    grabHTTP(buf, "tcp", ip, port, dport)
 
 class UDPServer(DatagramServer):
 
@@ -184,9 +211,11 @@ class UDPServer(DatagramServer):
         with open("logs.txt", "a") as f:
             f.write(log)
             f.close()
+
         with open("captures/udp/%d_%s_%d_%s.txt" % (dport, ip, port, datetime.utcnow().isoformat().replace(":", "-").replace(".", "-"),) , "wb") as file:
             file.write(data)
-            file.close()    
+            file.close()   
+        grabHTTP(data, "udp", ip, port, dport) 
 
 if not os.path.exists("captures"):
         os.makedirs("captures")
@@ -194,6 +223,9 @@ if not os.path.exists("captures/tcp"):
         os.makedirs("captures/tcp")
 if not os.path.exists("captures/udp"):
         os.makedirs("captures/udp")
+if not os.path.exists("captures/binary"):
+        os.makedirs("captures/binary")
+
 
 tcpserver = StreamServer(('', 5000), handleTCP)
 udpserver = UDPServer(('', 5000))
